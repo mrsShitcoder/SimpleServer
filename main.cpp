@@ -2,6 +2,8 @@
 #include <iostream>
 #include <array>
 
+#include "NetUtils/TcpAcceptor.hpp"
+
 using boost::asio::ip::tcp;
 
 class Session : public std::enable_shared_from_this<Session> {
@@ -70,7 +72,16 @@ int main(int argc, char* argv[]) {
 
         boost::asio::io_context io_context;
 
-        Server s(io_context, std::atoi(argv[1]));
+		SimpleServer::TcpAcceptor acceptor(io_context, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
+		//FIXME
+		acceptor.asyncAccept([](boost::system::error_code ec, tcp::socket &&socket) -> boost::asio::awaitable<bool>
+							 {
+								 if (!ec)
+								 {
+									 std::make_shared<Session>(std::move(socket))->start();
+								 }
+								 co_return true;
+							 });
 
         io_context.run();
     } catch (std::exception& e) {
