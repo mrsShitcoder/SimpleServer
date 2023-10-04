@@ -1,6 +1,7 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <array>
+#include <boost/asio/detached.hpp>
 
 #include "NetUtils/TcpAcceptor.hpp"
 
@@ -73,17 +74,17 @@ int main(int argc, char* argv[]) {
         boost::asio::io_context io_context;
 
 		SimpleServer::TcpAcceptor acceptor(io_context, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
-		//FIXME
-		acceptor.asyncAccept([](boost::system::error_code ec, tcp::socket &&socket) -> boost::asio::awaitable<bool>
-							 {
-								 if (!ec)
-								 {
-									 std::make_shared<Session>(std::move(socket))->start();
-								 }
-								 co_return true;
-							 });
 
-        io_context.run();
+		co_spawn(io_context,
+				 acceptor.asyncAccept(
+					 [](boost::asio::ip::tcp::socket &&socket) -> boost::asio::awaitable<bool>
+					 {
+						 std::make_shared<Session>(std::move(socket))->start();
+						 co_return true;
+					 }),
+				 boost::asio::detached);
+
+		io_context.run();
     } catch (std::exception& e) {
         std::cerr << "Exception: " << e.what() << "\n";
     }

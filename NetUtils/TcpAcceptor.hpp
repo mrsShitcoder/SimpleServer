@@ -10,9 +10,9 @@ namespace SimpleServer
 {
 	template<typename TCoroutine>
 	concept AcceptExecutor =
-		requires(TCoroutine coroutine, boost::system::error_code ec, boost::asio::ip::tcp::socket &&socket)
+		requires(TCoroutine&& coroutine, boost::asio::ip::tcp::socket&& socket)
 		{
-			{coroutine(ec, socket)} -> std::same_as<boost::asio::awaitable<bool>>;
+			{coroutine(std::move(socket))} -> std::same_as<boost::asio::awaitable<bool>>;
 		};
 
 	class TcpAcceptor
@@ -21,28 +21,37 @@ namespace SimpleServer
 		boost::asio::ip::tcp::acceptor _acceptor;
 		boost::asio::io_context &_context;
 
+
+		void _completionHandler(std::exception_ptr eptr, bool result)
+		{
+			try
+			{
+				if (eptr)
+				{
+					std::rethrow_exception(eptr);
+				}
+				std::cout << "Connection handled with result: " << result << "\n";
+			}
+			catch (const std::exception &e)
+			{
+				std::cerr << "Exception while processing connection: " << e.what() << "\n";
+			}
+		}
+
 	public:
 		explicit TcpAcceptor(boost::asio::io_context &context, const boost::asio::ip::tcp::endpoint &endpoint)
 			: _context(context), _acceptor(context, endpoint)
 		{}
 
 		template<AcceptExecutor TCoroutine>
-		void asyncAccept(TCoroutine &&executor)
+		boost::asio::awaitable<void> asyncAccept(TCoroutine &&executor)
 		{
-			_acceptor.async_accept(
-				boost::asio::bind_executor(_context.get_executor(),
-										   [this, executor = std::forward<TCoroutine>(executor)](
-											   boost::system::error_code ec, boost::asio::ip::tcp::socket &&socket)
-										   {
-											   if (!ec)
-											   {
-												   auto result = co_await executor(ec, std::move(socket));
-												   if (result)
-												   {
-													   asyncAccept(std::forward<TCoroutine>(executor));
-												   }
-											   }
-										   }));
+			for (;;)
+			{
+				auto socket = co_await _acceptor.async_accept(boost::asio::use_awaitable);
+				boost::asio::co_spawn(_context, executor(std::move(socket)),
+									  [&](std::exception_ptr eptr, bool result) { _completionHandler(eptr, result); });
+			}
 		}
 
 		boost::system::error_code close()
