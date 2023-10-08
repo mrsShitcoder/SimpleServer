@@ -3,65 +3,43 @@
 #include <array>
 #include <boost/asio/detached.hpp>
 
-#include "NetUtils/TcpAcceptor.hpp"
+#include "Lib/TcpAcceptor.hpp"
 
 using boost::asio::ip::tcp;
 
-class Session : public std::enable_shared_from_this<Session> {
+class Session{
 public:
     Session(tcp::socket socket) : socket_(std::move(socket)) {}
 
-    void start() {
-        read();
+	boost::asio::awaitable<void> start() {
+        co_await read();
     }
 
 private:
-    void read() {
-        auto self(shared_from_this());
-        socket_.async_read_some(
-                boost::asio::buffer(data_),
-                [this, self](boost::system::error_code ec, std::size_t length) {
-                    if (!ec) {
-                        write(length);
-                    }
-                });
-    }
+	boost::asio::awaitable<void> read()
+	{
+		for (;;)
+		{
+			std::size_t received = co_await boost::asio::async_read_until(socket_, boost::asio::dynamic_buffer(_buffer), "\n", boost::asio::use_awaitable);
+			std::cout
+				<< "Received: "
+				<< std::string_view(reinterpret_cast<const char *>(_buffer.data()), received)
+				<< "\n";
+			co_await write(received);
+			_buffer.clear();
+		}
+	}
 
-    void write(std::size_t length) {
-        auto self(shared_from_this());
-        boost::asio::async_write(
+	boost::asio::awaitable<void> write(std::size_t length) {
+		std::cout << "Writing: " << std::string_view(reinterpret_cast<const char *>(_buffer.data()), length) << "\n";
+        co_await boost::asio::async_write(
                 socket_,
-                boost::asio::buffer(data_, length),
-                [this, self](boost::system::error_code ec, std::size_t /*length*/) {
-                    if (!ec) {
-                        read();
-                    }
-                });
+                boost::asio::buffer(_buffer, length),
+               boost::asio::use_awaitable);
     }
 
     tcp::socket socket_;
-    std::array<char, 1024> data_;
-};
-
-class Server {
-public:
-    Server(boost::asio::io_context& io_context, short port)
-        : acceptor_(io_context, tcp::endpoint(tcp::v4(), port)) {
-        accept();
-    }
-
-private:
-    void accept() {
-        acceptor_.async_accept(
-                [this](boost::system::error_code ec, tcp::socket socket) {
-                    if (!ec) {
-                        std::make_shared<Session>(std::move(socket))->start();
-                    }
-                    accept();
-                });
-    }
-
-    tcp::acceptor acceptor_;
+    std::basic_string<std::byte> _buffer;
 };
 
 int main(int argc, char* argv[]) {
@@ -73,13 +51,13 @@ int main(int argc, char* argv[]) {
 
         boost::asio::io_context io_context;
 
-		SimpleServer::TcpAcceptor acceptor(io_context, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
+		SimpleServer::Lib::TcpAcceptor acceptor(io_context, tcp::endpoint(tcp::v4(), std::atoi(argv[1])));
 
 		co_spawn(io_context,
 				 acceptor.asyncAccept(
 					 [](boost::asio::ip::tcp::socket &&socket) -> boost::asio::awaitable<bool>
 					 {
-						 std::make_shared<Session>(std::move(socket))->start();
+						 co_await std::make_shared<Session>(std::move(socket))->start();
 						 co_return true;
 					 }),
 				 boost::asio::detached);

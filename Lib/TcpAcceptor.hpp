@@ -6,13 +6,13 @@
 #include <boost/asio/strand.hpp>
 #include <coroutine>
 
-namespace SimpleServer
+namespace SimpleServer::Lib
 {
-	template<typename TCoroutine>
+	template<typename TExecutor>
 	concept AcceptExecutor =
-		requires(TCoroutine&& coroutine, boost::asio::ip::tcp::socket&& socket)
+		requires(TExecutor&& executor, boost::asio::ip::tcp::socket&& socket)
 		{
-			{coroutine(std::move(socket))} -> std::same_as<boost::asio::awaitable<bool>>;
+			{executor(std::move(socket))} -> std::same_as<boost::asio::awaitable<bool>>;
 		};
 
 	class TcpAcceptor
@@ -43,8 +43,8 @@ namespace SimpleServer
 			: _context(context), _acceptor(context, endpoint)
 		{}
 
-		template<AcceptExecutor TCoroutine>
-		boost::asio::awaitable<void> asyncAccept(TCoroutine &&executor)
+		template<AcceptExecutor TExecutor>
+		boost::asio::awaitable<void> asyncAccept(TExecutor&& executor)
 		{
 			for (;;)
 			{
